@@ -1,21 +1,20 @@
 import KsApi
 import Library
 import Prelude
+import SwiftUI
 import UIKit
 
 internal final class BackerDashboardViewController: UIViewController {
   @IBOutlet private var avatarImageView: CircleAvatarImageView!
-  @IBOutlet private var backedMenuButton: UIButton!
   @IBOutlet private var backerNameLabel: UILabel!
   @IBOutlet private var dividerView: UIView!
   @IBOutlet private var embeddedViewTopLayoutConstraint: NSLayoutConstraint!
   @IBOutlet private var headerTopContainerView: UIView!
+  @IBOutlet private var backerInfoStackView: UIStackView!
   @IBOutlet private var headerStackView: UIStackView!
   @IBOutlet private var headerView: UIView!
   @IBOutlet private var headerViewTopConstraint: NSLayoutConstraint!
-  @IBOutlet private var menuButtonsStackView: UIStackView!
   @IBOutlet private var messagesButtonItem: UIBarButtonItem!
-  @IBOutlet private var savedMenuButton: UIButton!
   @IBOutlet private var selectedButtonIndicatorLeadingConstraint: NSLayoutConstraint!
   @IBOutlet private var selectedButtonIndicatorView: UIView!
   @IBOutlet private var selectedButtonIndicatorWidthConstraint: NSLayoutConstraint!
@@ -25,11 +24,19 @@ internal final class BackerDashboardViewController: UIViewController {
 
   fileprivate weak var pageViewController: UIPageViewController?
 
-  fileprivate let viewModel: BackerDashboardViewModelType = BackerDashboardViewModel()
+  fileprivate let viewModel: BackerDashboardViewModel = BackerDashboardViewModel()
   fileprivate var pagesDataSource: BackerDashboardPagesDataSource!
 
   private var panGesture = UIPanGestureRecognizer()
   private var projectSavedObserver: Any?
+
+  @available(iOS 14.0, *)
+  private lazy var backedSavedTabBar =
+    UIHostingController(rootView: BackerDashboardTabBarView(
+      backedTabText: self.viewModel.backedTabText,
+      savedTabText: self.viewModel.savedTabText,
+      selectTab: { self.selectTab($0) }
+    ))
 
   internal static func instantiate() -> BackerDashboardViewController {
     return Storyboard.BackerDashboard.instantiate(BackerDashboardViewController.self)
@@ -48,11 +55,10 @@ internal final class BackerDashboardViewController: UIViewController {
     )
     self.pageViewController?.delegate = self
 
-    _ = self.backedMenuButton
-      |> UIButton.lens.targets .~ [(self, action: #selector(self.backedButtonTapped), .touchUpInside)]
-
-    _ = self.savedMenuButton
-      |> UIButton.lens.targets .~ [(self, action: #selector(self.savedButtonTapped), .touchUpInside)]
+    if #available(iOS 14.0, *) {
+      self.headerStackView.addSubview(self.backedSavedTabBar.view)
+      self.setupConstraints()
+    }
 
     _ = self.messagesButtonItem
       |> UIBarButtonItem.lens.targetAction .~ (self, #selector(self.messagesButtonTapped))
@@ -96,24 +102,10 @@ internal final class BackerDashboardViewController: UIViewController {
       self.viewModel.outputs.embeddedViewTopConstraintConstant
     self.sortBar.rac.hidden = self.viewModel.outputs.sortBarIsHidden
 
-    self.viewModel.outputs.backedButtonTitleText
-      .observeForUI()
-      .observeValues { [weak self] string in
-        guard let _self = self else { return }
-        _self.setAttributedTitles(for: _self.backedMenuButton, with: string)
-      }
-
     self.viewModel.outputs.configurePagesDataSource
       .observeForControllerAction()
       .observeValues { [weak self] tab, sort in
         self?.configurePagesDataSource(tab: tab, sort: sort)
-      }
-
-    self.viewModel.outputs.savedButtonTitleText
-      .observeForUI()
-      .observeValues { [weak self] string in
-        guard let _self = self else { return }
-        _self.setAttributedTitles(for: _self.savedMenuButton, with: string)
       }
 
     self.viewModel.outputs.goToMessages
@@ -144,21 +136,9 @@ internal final class BackerDashboardViewController: UIViewController {
         )
       }
 
-    self.viewModel.outputs.pinSelectedIndicatorToTab
-      .observeForUI()
-      .observeValues { [weak self] tab, animated in
-        self?.pinSelectedIndicator(to: tab, animated: animated)
-      }
-
     self.viewModel.outputs.postNotification
       .observeForUI()
       .observeValues(NotificationCenter.default.post)
-
-    self.viewModel.outputs.setSelectedButton
-      .observeForUI()
-      .observeValues { [weak self] in
-        self?.selectButton(atTab: $0)
-      }
 
     self.viewModel.outputs.updateCurrentUserInEnvironment
       .observeForUI()
@@ -202,6 +182,18 @@ internal final class BackerDashboardViewController: UIViewController {
       |> UILabel.lens.font .~ .ksr_headline(size: 18)
   }
 
+  private func setupConstraints() {
+    if #available(iOS 14.0, *) {
+      self.backedSavedTabBar.view.translatesAutoresizingMaskIntoConstraints = false
+      NSLayoutConstraint.activate([
+        self.backedSavedTabBar.view.topAnchor.constraint(equalTo: self.backerInfoStackView.bottomAnchor),
+        self.backedSavedTabBar.view.bottomAnchor.constraint(equalTo: self.headerStackView.bottomAnchor),
+        self.backedSavedTabBar.view.widthAnchor.constraint(equalTo: self.headerStackView.widthAnchor),
+        self.backedSavedTabBar.view.heightAnchor.constraint(equalToConstant: 108)
+      ])
+    }
+  }
+
   private func configurePagesDataSource(tab: BackerDashboardTab, sort: DiscoveryParams.Sort) {
     self.pagesDataSource = BackerDashboardPagesDataSource(delegate: self, sort: sort)
 
@@ -235,42 +227,21 @@ internal final class BackerDashboardViewController: UIViewController {
       |> (UIButton.lens.titleLabel .. UILabel.lens.lineBreakMode) .~ .byWordWrapping
   }
 
-  private func selectButton(atTab tab: BackerDashboardTab) {
-    guard let index = self.pagesDataSource.indexFor(tab: tab) else { return }
-
-    for (idx, button) in self.menuButtonsStackView.arrangedSubviews.enumerated() {
-      _ = (button as? UIButton)
-        ?|> UIButton.lens.isSelected .~ (idx == index)
-    }
-  }
-
-  private func pinSelectedIndicator(to tab: BackerDashboardTab, animated: Bool) {
-    guard let index = self.pagesDataSource.indexFor(tab: tab) else { return }
-    guard let button = self.menuButtonsStackView.arrangedSubviews[index] as? UIButton else { return }
-
-    let leadingConstant = button.frame.origin.x + Styles.grid(1)
-    let widthConstant = button.titleLabel?.frame.size.width ?? button.frame.size.width
-
-    UIView.animate(
-      withDuration: animated ? 0.2 : 0.0,
-      delay: 0.0,
-      options: .curveEaseOut,
-      animations: {
-        self.headerView.setNeedsLayout()
-        self.selectedButtonIndicatorLeadingConstraint.constant = leadingConstant
-        self.selectedButtonIndicatorWidthConstraint.constant = widthConstant
-        self.headerView.layoutIfNeeded()
-      },
-      completion: nil
-    )
-  }
-
   private func goToSettings() {
     let vc = SettingsViewController.instantiate()
     let nav = UINavigationController(rootViewController: vc)
     nav.modalPresentationStyle = .formSheet
 
     self.present(nav, animated: true, completion: nil)
+  }
+
+  private func selectTab(_ tab: BackerDashboardTab) {
+    switch tab {
+    case .backed:
+      self.viewModel.inputs.backedProjectsButtonTapped()
+    case .saved:
+      self.viewModel.inputs.savedProjectsButtonTapped()
+    }
   }
 
   @objc private func tapGestureNotifier() {
@@ -285,21 +256,20 @@ internal final class BackerDashboardViewController: UIViewController {
     self.viewModel.inputs.settingsButtonTapped()
   }
 
-  @objc private func backedButtonTapped() {
-    self.viewModel.inputs.backedProjectsButtonTapped()
-  }
-
-  @objc private func savedButtonTapped() {
-    self.viewModel.inputs.savedProjectsButtonTapped()
-  }
-
   @objc private func handlePan(gesture: UIPanGestureRecognizer) {
     let selectedTab = self.viewModel.outputs.currentSelectedTab
     guard let controller = self.pagesDataSource.controllerFor(tab: selectedTab) as?
       BackerDashboardProjectsViewController else { return }
 
-    let minHeaderHeight = self.topBackgroundView.frame.size.height
-      - self.menuButtonsStackView.frame.size.height - Styles.grid(3)
+    var minHeaderHeight: CGFloat
+
+    if #available(iOS 14.0, *) {
+      minHeaderHeight = self.topBackgroundView.frame.size.height
+        - self.backedSavedTabBar.view.frame.size.height - Styles.grid(3)
+    } else {
+      minHeaderHeight = self.topBackgroundView.frame.size.height
+        - self.headerStackView.frame.size.height - Styles.grid(3)
+    }
 
     switch gesture.state {
     case .began:

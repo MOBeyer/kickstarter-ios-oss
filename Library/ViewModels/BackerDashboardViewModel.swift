@@ -1,9 +1,10 @@
 import KsApi
 import Prelude
 import ReactiveSwift
+import SwiftUI
 import UIKit
 
-public enum BackerDashboardTab {
+public enum BackerDashboardTab: String, CaseIterable {
   case backed
   case saved
 
@@ -50,9 +51,6 @@ public protocol BackerDashboardViewModelOutputs {
   /// Emits a URL for the avatar image view.
   var avatarURL: Signal<URL?, Never> { get }
 
-  /// Emits a string for the backed button title label.
-  var backedButtonTitleText: Signal<String, Never> { get }
-
   /// Emits a string for the backer name label.
   var backerNameText: Signal<String, Never> { get }
 
@@ -83,9 +81,6 @@ public protocol BackerDashboardViewModelOutputs {
   /// Emits an Notification that should be immediately posted.
   var postNotification: Signal<Notification, Never> { get }
 
-  /// Emits a string for the saved button title label.
-  var savedButtonTitleText: Signal<String, Never> { get }
-
   /// Emits the selected BackerDashboardTab to set the selected button and update all button selected states.
   var setSelectedButton: Signal<BackerDashboardTab, Never> { get }
 
@@ -102,7 +97,17 @@ public protocol BackerDashboardViewModelType {
 }
 
 public final class BackerDashboardViewModel: BackerDashboardViewModelType, BackerDashboardViewModelInputs,
-  BackerDashboardViewModelOutputs {
+  BackerDashboardViewModelOutputs, ObservableObject {
+  let _user: User? = AppEnvironment.current.currentUser
+
+  public var backedTabText: String {
+    return Strings.projects_count_newline_backed(projects_count: self._user?.stats.backedProjectsCount ?? 0)
+  }
+
+  public var savedTabText: String {
+    return Strings.projects_count_newline_saved(projects_count: self._user?.stats.starredProjectsCount ?? 0)
+  }
+
   public init() {
     self.configurePagesDataSource = self.viewDidLoadProperty.signal
       .map { (.backed, DiscoveryParams.Sort.endingSoon) }
@@ -127,15 +132,7 @@ public final class BackerDashboardViewModel: BackerDashboardViewModelType, Backe
 
     self.avatarURL = user.map { URL(string: $0.avatar.large ?? $0.avatar.medium) }
 
-    self.backedButtonTitleText = user.map { user in
-      Strings.projects_count_newline_backed(projects_count: user.stats.backedProjectsCount ?? 0)
-    }
-
     self.backerNameText = user.map { $0.name }
-
-    self.savedButtonTitleText = user.map { user in
-      Strings.projects_count_newline_saved(projects_count: user.stats.starredProjectsCount ?? 0)
-    }
 
     let swipedToTab = self.willTransitionToPageProperty.signal
       .takeWhen(self.pageTransitionCompletedProperty.signal.filter(isTrue))
@@ -150,12 +147,10 @@ public final class BackerDashboardViewModel: BackerDashboardViewModelType, Backe
     self.currentSelectedTabProperty <~ self.navigateToTab
 
     self.setSelectedButton = Signal.merge(
-      self.backedButtonTitleText.skip(first: 1).mapConst(.backed).take(first: 1),
       self.navigateToTab
     )
 
     self.pinSelectedIndicatorToTab = Signal.merge(
-      self.backedButtonTitleText.skip(first: 1).mapConst((.backed, false)).take(first: 1),
       self.navigateToTab.map { ($0, true) }.skipRepeats(==)
     )
 
@@ -253,7 +248,6 @@ public final class BackerDashboardViewModel: BackerDashboardViewModelType, Backe
   }
 
   public let avatarURL: Signal<URL?, Never>
-  public let backedButtonTitleText: Signal<String, Never>
   public let backerNameText: Signal<String, Never>
   public let configurePagesDataSource: Signal<(BackerDashboardTab, DiscoveryParams.Sort), Never>
   public let embeddedViewTopConstraintConstant: Signal<CGFloat, Never>
@@ -262,7 +256,6 @@ public final class BackerDashboardViewModel: BackerDashboardViewModelType, Backe
   public let navigateToTab: Signal<BackerDashboardTab, Never>
   public let pinSelectedIndicatorToTab: Signal<(BackerDashboardTab, Bool), Never>
   public let postNotification: Signal<Notification, Never>
-  public let savedButtonTitleText: Signal<String, Never>
   public let setSelectedButton: Signal<BackerDashboardTab, Never>
   public let sortBarIsHidden: Signal<Bool, Never>
   public let updateCurrentUserInEnvironment: Signal<User, Never>
